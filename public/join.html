@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ask a doubt — DoubtDesk</title>
+<meta name="description" content="Ask your study doubt. No login needed.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav class="top" aria-label="Main">
+    <div class="logo" aria-hidden="true">Dd</div>
+    <div class="brand">DoubtDesk <small>Question slip</small></div>
+    <div class="top-links"><a class="top-pill" href="/">New session</a></div>
+  </nav>
+
+  <main>
+  <div class="student-hero" id="sessionHead" aria-live="polite" aria-busy="true">
+    <div class="skel skel-title"></div>
+    <div class="skel skel-line"></div>
+    <div class="skel skel-line short"></div>
+  </div>
+  <div id="scopeBanner"></div>
+
+  <div class="student-grid">
+    <section class="slip" id="askCard" style="display:none" aria-labelledby="askH">
+      <div class="slip-head"><span>Question slip</span><strong>No login needed</strong></div>
+      <div class="slip-body">
+        <h2 id="askH">Ask your doubt</h2>
+        <p class="card-sub">Your teacher sees it live. One clear question works best.</p>
+        <form id="doubtForm" novalidate>
+          <label class="field" for="name">Your name <span style="font-weight:500;color:var(--muted)">(optional)</span></label>
+          <input id="name" maxlength="40" placeholder="Aarav" autocomplete="nickname">
+          <label class="field" for="text" id="textLabel">Your doubt</label>
+          <textarea id="text" maxlength="500" placeholder="Quadratic ka formula kab use hota hai? Exercise 2.3 q5 samjha do." required aria-describedby="charHint askTip"></textarea>
+          <div class="char-row"><span id="charHint">0 / 500</span><span>English · Hindi · Hinglish</span></div>
+          <div class="char-bar" aria-hidden="true"><i id="charBar"></i></div>
+          <p class="field-hint" id="askTip">Ask one study question per message and mention the chapter or question number. “Ex 2.3 q5” gets answered faster than “maths samjhao”. Extra chat, links or ads can get the message filtered.</p>
+          <div class="row" style="margin-top:18px"><button type="submit" class="primary" id="sendBtn">Submit doubt →</button></div>
+        </form>
+        <div id="formMsg" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <div class="side-stack">
+      <section class="card" aria-label="How it works">
+        <h2>What happens next</h2>
+        <div class="steps">
+          <div class="step"><span class="n">01</span><b>You ask</b><br>Your doubt goes to your teacher's live queue.</div>
+          <div class="step"><span class="n">02</span><b>The filter checks</b><br>Genuine questions pass. Ads, abuse, social chat and timepass are held back.</div>
+          <div class="step"><span class="n">03</span><b>Your teacher answers</b><br>Solved answers appear on this page.</div>
+        </div>
+        <div class="trust-row">
+          <span class="trust-chip">Open doubts stay private</span>
+          <span class="trust-chip">Filtered messages are never deleted</span>
+        </div>
+      </section>
+
+      <section class="card" id="solvedCard" style="display:none" aria-labelledby="solvedH">
+        <h2 id="solvedH">Solved in this session</h2>
+        <p class="card-sub" id="solvedCount"></p>
+        <div id="solvedList"></div>
+      </section>
+    </div>
+  </div>
+  </main>
+
+  <footer class="footer"><span>DoubtDesk · ask freely, learn loudly</span><span>Only genuine study doubts reach your teacher</span></footer>
+</div>
+
+<script>
+const code = (location.pathname.split('/').filter(Boolean).pop() || '').toUpperCase();
+const head = document.getElementById('sessionHead');
+const textEl = document.getElementById('text');
+const charHint = document.getElementById('charHint');
+const charBar = document.getElementById('charBar');
+let lastScopeKey = '';
+
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+textEl.addEventListener('input', () => {
+  const n = textEl.value.length;
+  charHint.textContent = `${n} / 500`;
+  charBar.style.transform = `scaleX(${Math.min(1, n / 500)})`;
+  textEl.removeAttribute('aria-invalid');
+});
+
+function hero(title, subject, count) {
+  head.innerHTML = '';
+  head.setAttribute('aria-busy', 'false');
+  const h = document.createElement('header');
+  const eb = el('span', '', 'eyebrow');
+  eb.innerHTML = '<i></i>Live doubt room · ' + (code || '');
+  h.appendChild(eb);
+  const t = document.createElement('h1');
+  t.textContent = title || 'Doubt session';
+  h.appendChild(t);
+  const sub = el('p', '', 'lead');
+  const tally = (count !== undefined && count > 0) ? `${count} solved so far · ` : '';
+  sub.textContent = (subject ? subject + ' · ' : '') + tally + 'Ask yours below.';
+  h.appendChild(sub);
+  head.appendChild(h);
+}
+
+function fail(msg) {
+  head.innerHTML = '';
+  head.setAttribute('aria-busy', 'false');
+  head.appendChild(el('div', msg, 'notice err'));
+  const retry = el('button', 'Retry', 'ghost');
+  retry.style.marginTop = '12px';
+  retry.onclick = () => { loadSession(true); };
+  head.appendChild(retry);
+}
+
+function renderScope(d) {
+  const key = [d.mode, d.subject, d.chapter].join('|');
+  const banner = document.getElementById('scopeBanner');
+  if (key === lastScopeKey) return key;
+  const changed = lastScopeKey !== '';
+  lastScopeKey = key;
+  banner.innerHTML = '';
+  const mode = d.mode || 'both';
+  let msg = null;
+  if (mode === 'chapter' && d.chapter) {
+    msg = ['This room is only for ', d.chapter, '. Other chapters will be filtered out.', 'Your doubt — must be about ' + d.chapter];
+  } else if (mode === 'subject' && d.subject) {
+    msg = ['This room is only for ', d.subject, ' doubts. Other subjects will be filtered out.', 'Your doubt — must be about ' + d.subject];
+  } else {
+    document.getElementById('textLabel').textContent = 'Your doubt';
+    return key;
+  }
+  const b = el('div', '', 'scope-note');
+  b.setAttribute('role', changed ? 'alert' : 'note');
+  const strong = el('strong', msg[1]);
+  b.append(msg[0], strong, msg[2]);
+  if (changed) b.prepend('Filter updated · ');
+  banner.appendChild(b);
+  document.getElementById('textLabel').textContent = msg[3];
+  return key;
+}
+
+async function loadSession(isRetry) {
+  if (!code) { fail('This student link looks incomplete. Ask your teacher for the full link.'); return; }
+  if (isRetry) {
+    head.setAttribute('aria-busy', 'true');
+    head.innerHTML = '<div class="skel skel-title"></div><div class="skel skel-line"></div><div class="skel skel-line short"></div>';
+  }
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    let r;
+    try { r = await fetch(`/api/session/${encodeURIComponent(code)}/public`, { signal: ctrl.signal }); }
+    finally { clearTimeout(timer); }
+    let data = {};
+    try { data = await r.json(); } catch { data = {}; }
+    if (!r.ok) { fail(data.error || `Session not found (HTTP ${r.status}). Check the link.`); return; }
+    hero(data.title, data.subject, (data.solved || []).length);
+    renderScope(data);
+    document.getElementById('askCard').style.display = '';
+    renderSolved(data.solved || []);
+  } catch (err) {
+    fail(err && err.name === 'AbortError'
+      ? 'The server took too long to respond. Check your connection and retry.'
+      : 'Could not reach the server. Check your connection and retry.');
+  }
+}
+
+function renderSolved(list) {
+  const card = document.getElementById('solvedCard');
+  const box = document.getElementById('solvedList');
+  box.innerHTML = '';
+  if (!list.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('solvedCount').textContent = `${list.length} doubt${list.length === 1 ? '' : 's'} answered by your teacher.`;
+  for (const d of [...list].reverse()) {
+    const div = el('div', '', 'doubt solved-card d-solved');
+    const q = el('div', d.text, 'text');
+    q.style.margin = '0';
+    div.appendChild(q);
+    if (d.answer) {
+      const a = el('div', '', 'answer-given');
+      a.appendChild(el('div', "Teacher's answer", 'ans-label'));
+      a.appendChild(el('div', d.answer, 'ans-text'));
+      div.appendChild(a);
+    }
+    box.appendChild(div);
+  }
+}
+
+async function refresh() {
+  try {
+    const r = await fetch(`/api/session/${encodeURIComponent(code)}/public`);
+    if (!r.ok) return;
+    const data = await r.json();
+    renderSolved(data.solved || []);
+    renderScope(data);
+  } catch { /* keep old list */ }
+}
+
+document.getElementById('doubtForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('sendBtn');
+  const msg = document.getElementById('formMsg');
+  msg.innerHTML = '';
+  const text = textEl.value.trim();
+  if (text.length < 3) {
+    textEl.setAttribute('aria-invalid', 'true');
+    const d = el('div', 'Write a little more — at least 3 characters so your teacher can understand it.', 'notice warn');
+    msg.appendChild(d);
+    textEl.focus();
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const r = await fetch(`/api/session/${encodeURIComponent(code)}/doubts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: document.getElementById('name').value, text }),
+    });
+    const data = await r.json();
+    const d = el('div', data.message || data.error || 'Done.', r.ok
+      ? (data.status === 'flagged' ? 'notice warn' : 'notice ok')
+      : 'notice err');
+    msg.appendChild(d);
+    if (r.ok && data.status !== 'flagged') {
+      textEl.value = '';
+      charHint.textContent = '0 / 500';
+      charBar.style.transform = 'scaleX(0)';
+    } else if (r.ok) {
+      textEl.focus();
+    }
+  } catch {
+    msg.appendChild(el('div', 'Could not reach the server. Try again.', 'notice err'));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Submit doubt →';
+  }
+});
+
+loadSession();
+setInterval(refresh, 8000);
+</script>
+</body>
+</html>

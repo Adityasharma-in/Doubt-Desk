@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teacher dashboard — DoubtDesk</title>
+<meta name="description" content="Live doubt queue with AI filtering.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav class="top" aria-label="Main">
+    <div class="logo" aria-hidden="true">Dd</div>
+    <div class="brand">DoubtDesk <small><span class="live-dot"></span>Live dashboard</small></div>
+    <div class="head-tools">
+      <details class="settings" id="settingsMenu">
+        <summary aria-label="View display settings">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+            <path d="M2 4h12M2 8h12M2 12h12"/>
+            <circle cx="6" cy="4" r="1.6" fill="var(--paper)"/>
+            <circle cx="10" cy="8" r="1.6" fill="var(--paper)"/>
+            <circle cx="5" cy="12" r="1.6" fill="var(--paper)"/>
+          </svg>
+          <span class="settings-label">View</span>
+        </summary>
+        <div class="settings-panel">
+          <p class="settings-title">Dashboard display</p>
+          <label class="switch-row" for="toggleAI">
+            <span class="switch-copy">
+              <b>AI filter details</b>
+              <small>Show JEV scores, filter signals and the filter version under each doubt.</small>
+            </span>
+            <span class="switch">
+              <input type="checkbox" id="toggleAI" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+            </span>
+          </label>
+          <p class="settings-note">Status reasons stay visible. Your choice is saved on this device.</p>
+        </div>
+      </details>
+      <a class="top-pill" href="/">+ New session</a>
+    </div>
+  </nav>
+
+  <div id="head" aria-live="polite" aria-busy="true">
+    <div class="skel skel-title"></div>
+    <div class="skel skel-line"></div>
+    <div class="skel skel-line short"></div>
+  </div>
+
+  <div id="dash" style="display:none">
+    <div class="stat-grid" id="stats" role="group" aria-label="Doubt queues — select to filter"></div>
+
+    <div class="dash-grid">
+      <main>
+        <div id="mobileShare"></div>
+        <div class="searchbar">
+          <input id="search" placeholder="Search all queues" autocomplete="off" aria-label="Search doubts across all queues">
+          <button class="ghost" id="clearSearch" type="button" style="display:none" aria-label="Clear search">×</button>
+        </div>
+        <label class="scope-all"><input type="checkbox" id="searchAll" checked> Search across all queues</label>
+        <div class="keymap"><span><span class="kbd">/</span> search</span><span><span class="kbd">Ctrl/⌘ + Enter</span> solve</span></div>
+        <div class="result-count" id="resultCount" aria-live="polite"></div>
+        <div id="list"></div>
+      </main>
+
+      <aside class="side-stack">
+        <section class="card share-card" aria-label="Share">
+          <h2>Share with class</h2>
+          <p class="card-sub">Students join instantly. No login.</p>
+          <div class="linkbox"><span id="studentUrl"></span><button class="ghost" id="copyBtn" type="button">Copy</button></div>
+          <div class="row tight">
+            <button class="ghost small" id="waBtn" type="button">WhatsApp</button>
+            <button class="ghost small" id="qrBtn" type="button" aria-expanded="false">QR</button>
+          </div>
+          <div class="qr-box" id="qrBox" style="display:none">QR unavailable — share the link instead.</div>
+        </section>
+
+        <section class="card" aria-label="AI filter">
+          <h2>Filter for new doubts</h2>
+          <p class="card-sub">Changes apply from now on. Old doubts stay where they are.</p>
+          <div class="mode-cards" id="modeSeg" role="group" aria-label="Doubt filter mode">
+            <button type="button" class="mode-card" data-mode="subject" aria-pressed="false">
+              <span class="mode-mark" aria-hidden="true"></span>
+              <span><span class="mode-name">Subject only</span><span class="mode-desc">Only this subject reaches you.</span></span>
+            </button>
+            <button type="button" class="mode-card" data-mode="chapter" aria-pressed="false">
+              <span class="mode-mark" aria-hidden="true"></span>
+              <span><span class="mode-name">Strict chapter</span><span class="mode-desc">Only the named chapter. The rest is held back.</span></span>
+            </button>
+            <button type="button" class="mode-card" data-mode="both" aria-pressed="false">
+              <span class="mode-mark" aria-hidden="true"></span>
+              <span><span class="mode-name">All study doubts</span><span class="mode-desc">Any genuine question passes.</span></span>
+            </button>
+          </div>
+          <label class="field" for="setSubject">Subject</label>
+          <input id="setSubject" maxlength="60" placeholder="Mathematics" autocomplete="off">
+          <label class="field" for="setChapter">Chapter / topic</label>
+          <input id="setChapter" maxlength="80" placeholder="Quadratic Equations" autocomplete="off">
+          <div class="row" style="margin-top:14px">
+            <button type="button" class="small primary" id="saveSettings">Save filter</button>
+          </div>
+          <div id="settingsMsg" aria-live="polite"></div>
+        </section>
+      </aside>
+    </div>
+  </div>
+</div>
+<div class="toast-wrap" id="toasts" role="status"></div>
+
+<script>
+const token = location.pathname.split('/').filter(Boolean).pop() || '';
+let data = null;
+let filter = 'accepted';
+let query = '';
+let searchAll = true;
+let drafts = {};
+let knownIds = new Set();
+let confirmRejectId = null;
+
+const AI_KEY = 'dd-ai-details';
+function aiDetailsEnabled() {
+  try { return localStorage.getItem(AI_KEY) !== '0'; } catch { return true; }
+}
+
+const TABS = [
+  ['accepted', 'Study queue', 's-accepted'],
+  ['review', 'Needs review', 's-review'],
+  ['flagged', 'Filtered', 's-flagged'],
+  ['solved', 'Solved', 's-solved'],
+];
+
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+const badgeClass = { accepted: 'b-accepted', review: 'b-review', flagged: 'b-flagged', solved: 'b-solved' };
+const badgeLabel = { accepted: 'study', review: 'review', flagged: 'filtered', solved: 'solved' };
+const metaGlyph = { accepted: '✓', review: '?', flagged: '×', solved: '✓' };
+
+function toast(msg) {
+  const w = document.getElementById('toasts');
+  while (w.children.length >= 3) w.firstChild.remove();
+  const t = el('div', '', 'toast');
+  t.textContent = msg;
+  w.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 320); }, 3400);
+}
+
+function fail(msg) {
+  const h = document.getElementById('head');
+  h.innerHTML = '';
+  h.setAttribute('aria-busy', 'false');
+  h.appendChild(el('div', msg, 'notice err'));
+  const retry = el('button', 'Retry', 'ghost');
+  retry.style.marginTop = '12px';
+  retry.onclick = () => load(true);
+  h.appendChild(retry);
+}
+
+async function load(isRetry) {
+  if (!token) { fail('This dashboard link looks incomplete. Open it from the link created with your session.'); return; }
+  if (isRetry) {
+    const h = document.getElementById('head');
+    h.setAttribute('aria-busy', 'true');
+    h.innerHTML = '<div class="skel skel-title"></div><div class="skel skel-line"></div><div class="skel skel-line short"></div>';
+  }
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    let r;
+    try { r = await fetch(`/api/teacher/${encodeURIComponent(token)}`, { signal: ctrl.signal }); }
+    finally { clearTimeout(timer); }
+    let parsed = {};
+    try { parsed = await r.json(); } catch { parsed = {}; }
+    data = parsed;
+    if (!r.ok) { fail(data.error || `Session not found (HTTP ${r.status}).`); return; }
+    knownIds = new Set((data.doubts || []).map((d) => d.id));
+    document.getElementById('dash').style.display = '';
+    renderHead();
+    renderStats();
+    renderSettings();
+    renderList(false);
+    bindShare();
+    buildMobileShare();
+    connectStream();
+  } catch (err) {
+    fail(err && err.name === 'AbortError' ? 'The server took too long. Check your connection and retry.' : 'Could not reach the server. Check your connection and retry.');
+  }
+}
+
+function timeAgo(iso) {
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return '';
+  const s = Math.max(1, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleString();
+}
+
+function renderHead() {
+  const h = document.getElementById('head');
+  h.innerHTML = '';
+  h.setAttribute('aria-busy', 'false');
+  const hero = document.createElement('header');
+  hero.className = 'session-head';
+  const eb = el('span', '', 'eyebrow');
+  eb.innerHTML = '<i></i>Session register · ' + (data.code || '—') + ' · ' + (data.total || 0) + ' doubts';
+  hero.appendChild(eb);
+  const t = el('h1', data.title || 'Doubt session');
+  hero.appendChild(t);
+  const sub = el('p', '', 'lead');
+  sub.textContent = [data.subject, data.chapter ? ('Chapter: ' + data.chapter) : null, 'Filter: ' + filterName(data.mode, data)].filter(Boolean).join('\u00A0· ');
+  hero.appendChild(sub);
+  h.appendChild(hero);
+  document.getElementById('studentUrl').textContent = data.studentUrl;
+}
+function filterName(m, d) {
+  if (m === 'chapter') return (d && d.chapter) ? `Strict: ${d.chapter}` : 'Strict chapter';
+  if (m === 'both') return 'All study doubts';
+  return (d && d.subject) ? `Subject: ${d.subject}` : 'Subject only';
+}
+
+function renderStats() {
+  const box = document.getElementById('stats');
+  box.innerHTML = '';
+  for (const [key, label, cls] of TABS) {
+    const b = el('button', '', 'stat ' + cls);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', filter === key ? 'true' : 'false');
+    const mark = el('span', '', 'tab-mark');
+    mark.setAttribute('aria-hidden', 'true');
+    const k = el('span', '', 'k');
+    k.append(mark, document.createTextNode(label));
+    b.append(k, el('span', String(data.counts[key] || 0), 'v'));
+    b.onclick = () => { filter = key; confirmRejectId = null; renderStats(); renderList(false); document.getElementById('list').scrollIntoView({ block: 'start', behavior: 'smooth' }); };
+    box.appendChild(b);
+  }
+}
+
+function renderSettings() {
+  document.querySelectorAll('#modeSeg .mode-card').forEach((b) => {
+    const on = b.dataset.mode === (data.mode || 'both');
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  const s = document.getElementById('setSubject');
+  const c = document.getElementById('setChapter');
+  if (document.activeElement !== s) s.value = data.subject || '';
+  if (document.activeElement !== c) c.value = data.chapter || '';
+}
+document.querySelectorAll('#modeSeg .mode-card').forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll('#modeSeg .mode-card').forEach((x) => {
+      const on = x === b;
+      x.classList.toggle('active', on);
+      x.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  };
+});
+
+function bindShare() {
+  const c = document.getElementById('copyBtn');
+  c.onclick = () => {
+    const t = data.studentUrl;
+    const done = (ok) => { c.textContent = ok === false ? 'Copy failed' : 'Copied'; setTimeout(() => c.textContent = 'Copy', 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => done(true)).catch(() => done(false));
+    else done(false);
+  };
+  document.getElementById('waBtn').onclick = () =>
+    window.open('https://wa.me/?text=' + encodeURIComponent('Join my doubt session: ' + data.studentUrl), '_blank', 'noopener');
+  const qrBtn = document.getElementById('qrBtn');
+  qrBtn.onclick = () => {
+    const box = document.getElementById('qrBox');
+    const open = box.style.display !== 'none';
+    if (open) { box.style.display = 'none'; qrBtn.setAttribute('aria-expanded', 'false'); return; }
+    box.style.display = '';
+    qrBtn.setAttribute('aria-expanded', 'true');
+    if (!box.dataset.loaded) {
+      box.dataset.loaded = '1';
+      const img = document.createElement('img');
+      img.alt = 'QR code for student link';
+      img.width = 126; img.height = 126; img.loading = 'lazy';
+      img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=' + encodeURIComponent(data.studentUrl);
+      img.onerror = () => { box.textContent = 'QR unavailable — share the link instead.'; };
+      box.textContent = '';
+      box.appendChild(img);
+    }
+  };
+}
+
+function buildMobileShare() {
+  const slot = document.getElementById('mobileShare');
+  if (slot.dataset.built || !window.matchMedia('(max-width: 900px)').matches) return;
+  slot.dataset.built = '1';
+  const card = el('div', '', 'card share-card');
+  card.style.marginTop = '16px';
+  card.appendChild(el('h2', 'Share with class'));
+  const lb = el('div', '', 'linkbox');
+  lb.appendChild(el('span', data.studentUrl));
+  const c = el('button', 'Copy', 'ghost');
+  c.type = 'button';
+  c.onclick = () => {
+    const done = () => { c.textContent = 'Copied'; setTimeout(() => c.textContent = 'Copy', 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(data.studentUrl).then(done).catch(done);
+  };
+  lb.appendChild(c);
+  card.appendChild(lb);
+  slot.appendChild(card);
+}
+
+document.getElementById('saveSettings').addEventListener('click', async () => {
+  const msg = document.getElementById('settingsMsg');
+  msg.innerHTML = '';
+  const active = document.querySelector('#modeSeg .mode-card.active');
+  const mode = active ? active.dataset.mode : 'both';
+  const subject = document.getElementById('setSubject').value.trim();
+  const chapter = document.getElementById('setChapter').value.trim();
+  if (mode === 'chapter' && !chapter) { msg.appendChild(el('div', 'Strict chapter mode needs a chapter name.', 'notice warn')); return; }
+  if (mode === 'subject' && !subject) { msg.appendChild(el('div', 'Subject-only mode needs a subject.', 'notice warn')); return; }
+  msg.appendChild(el('div', 'Saving…', 'notice'));
+  try {
+    const r = await fetch(`/api/teacher/${encodeURIComponent(token)}/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, subject, chapter }),
+    });
+    const d = await r.json();
+    msg.innerHTML = '';
+    if (!r.ok) { msg.appendChild(el('div', d.error || 'Save failed.', 'notice err')); return; }
+    msg.appendChild(el('div', 'Saved. New doubts use the new rule; old doubts stay where they are.', 'notice ok'));
+    toast('Filter updated — new doubts use the new rule.');
+    await reload(true);
+  } catch { msg.innerHTML = ''; msg.appendChild(el('div', 'Could not reach the server.', 'notice err')); }
+});
+
+const searchEl = document.getElementById('search');
+const clearBtn = document.getElementById('clearSearch');
+searchEl.addEventListener('input', () => {
+  query = searchEl.value.trim().toLowerCase();
+  clearBtn.style.display = query ? '' : 'none';
+  renderList(false);
+});
+clearBtn.onclick = () => { searchEl.value = ''; query = ''; clearBtn.style.display = 'none'; renderList(false); searchEl.focus(); };
+document.getElementById('searchAll').addEventListener('change', (e) => { searchAll = e.target.checked; renderList(false); });
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  const typing = t && t.closest && t.closest('input, textarea, select, [contenteditable="true"]');
+  if (e.key === '/' && !typing) { e.preventDefault(); searchEl.focus(); }
+  if (e.key === 'Escape' && document.activeElement === searchEl) searchEl.blur();
+});
+
+function pct(x) { return (x === null || x === undefined) ? '—' : Math.round(x * 100) + '%'; }
+function band(x, high = 0.7, low = 0.4) {
+  if (x === null || x === undefined) return '';
+  if (x >= high) return 'good';
+  if (x < low) return 'low';
+  return 'mid';
+}
+function riskBand(x) {
+  if (x === null || x === undefined) return '';
+  if (x >= 0.72) return 'low';
+  if (x >= 0.45) return 'mid';
+  return 'good';
+}
+function aiSummaryText(d) {
+  const engine = d.aiEngine === 'jev' ? 'JEV AI' : 'Deterministic filter';
+  const parts = [engine];
+  if (d.isStudy !== null && d.isStudy !== undefined) parts.push(`study ${pct(d.isStudy)}`);
+  if (d.verdict) parts.push(String(d.verdict).replaceAll('_', ' '));
+  if (d.offTopicPart !== null && d.offTopicPart !== undefined && d.offTopicPart >= 0.5) {
+    parts.push(`off-topic part ${pct(d.offTopicPart)}`);
+  }
+  return parts.join(' · ');
+}
+function aiBlock(d) {
+  const box = el('details', '', 'ai-details');
+  const summary = el('summary', '', 'ai-summary');
+  summary.appendChild(el('span', aiSummaryText(d), 'ai-summary-text'));
+  box.appendChild(summary);
+  const body = el('div', '', 'ai');
+  body.appendChild(el('span', d.aiEngine === 'jev' ? 'JEV AI' : 'Deterministic filter', 'ai-tag'));
+  const chip = (k, x, tone) => {
+    const c = el('span', '', 'ai-chip' + (tone ? ' ' + tone : ''));
+    c.appendChild(el('span', k, 'k'));
+    c.appendChild(el('span', pct(x), 'v'));
+    body.appendChild(c);
+  };
+  if (d.isStudy !== null && d.isStudy !== undefined) chip('study', d.isStudy, band(d.isStudy));
+  if (d.verdict) {
+    const cf = (d.confidence !== null && d.confidence !== undefined) ? d.confidence : null;
+    chip(d.verdict.replaceAll('_', ' '), cf, cf === null ? '' : band(cf, 0.65, 0.45));
+  }
+  if (d.subjectFit !== null && d.subjectFit !== undefined) chip('subject fit', d.subjectFit, band(d.subjectFit, 0.6, 0.4));
+  if (d.chapterFit !== null && d.chapterFit !== undefined) chip('chapter fit', d.chapterFit, band(d.chapterFit, 0.65, 0.4));
+  if (d.offTopicPart !== null && d.offTopicPart !== undefined) chip('off-topic part', d.offTopicPart, riskBand(d.offTopicPart));
+  if (d.abuseSignal !== null && d.abuseSignal !== undefined) chip('abuse', d.abuseSignal, riskBand(d.abuseSignal));
+  if (d.spamSignal !== null && d.spamSignal !== undefined) chip('spam / promo', d.spamSignal, riskBand(d.spamSignal));
+  if (d.manipulationSignal !== null && d.manipulationSignal !== undefined) chip('manipulation', d.manipulationSignal, riskBand(d.manipulationSignal));
+  if (d.asksStudyHelp !== null && d.asksStudyHelp !== undefined) chip('asks for help', d.asksStudyHelp, band(d.asksStudyHelp, 0.6, 0.4));
+  if (Array.isArray(d.detFlags) && d.detFlags.length) {
+    body.appendChild(el('div', 'Filter signals: ' + d.detFlags.join(', '), 'ai-note'));
+  }
+  if (d.filterVersion) {
+    body.appendChild(el('div', `Filter v${d.filterVersion}${d.filterGate ? ' · ' + d.filterGate + ' gate' : ''}`, 'ai-note'));
+  }
+  box.appendChild(body);
+  return box;
+}
+
+function avatarFor(name) {
+  const clean = (name || 'A').trim() || 'A';
+  const a = el('div', clean.charAt(0).toUpperCase(), 'avatar');
+  a.setAttribute('aria-hidden', 'true');
+  return a;
+}
+
+const EMPTY = {
+  accepted: ['—', 'Queue is clear. Share the student link and new doubts will appear here live.', 'copy'],
+  review: ['—', 'Nothing needs review. Borderline doubts will wait here.', null],
+  flagged: ['—', 'Nothing filtered. Spam, abuse, social chat and piggybacked messages land here — never deleted, always recoverable.', null],
+  solved: ['—', 'Nothing solved yet. Answer a doubt and it will appear here.', null],
+};
+
+function esc(s) { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function highlight(text, q) {
+  if (!q) return document.createTextNode(text);
+  const frag = document.createDocumentFragment();
+  const low = text.toLowerCase();
+  let i = 0;
+  let idx = low.indexOf(q);
+  if (idx === -1) return document.createTextNode(text);
+  while (idx !== -1) {
+    if (idx > i) frag.appendChild(document.createTextNode(text.slice(i, idx)));
+    const m = el('mark', text.slice(idx, idx + q.length));
+    frag.appendChild(m);
+    i = idx + q.length;
+    idx = low.indexOf(q, i);
+  }
+  if (i < text.length) frag.appendChild(document.createTextNode(text.slice(i)));
+  return frag;
+}
+
+function pool() {
+  const all = data.doubts || [];
+  if (query && searchAll) return all;
+  return all.filter((d) => d.status === filter);
+}
+
+function renderList(isLive) {
+  const box = document.getElementById('list');
+  box.innerHTML = '';
+  let items = pool();
+  if (query) {
+    const ql = query.toLowerCase();
+    items = items.filter((d) => ((d.text || '') + ' ' + (d.name || '')).toLowerCase().includes(ql));
+  } else {
+    items = items.filter((d) => d.status === filter);
+  }
+  const rc = document.getElementById('resultCount');
+  if (query) {
+    rc.textContent = `${items.length} match${items.length === 1 ? '' : 'es'}${searchAll ? ' across all queues' : ' in ' + filterName(filter, data)} for “${searchEl.value.trim()}”`;
+  } else rc.textContent = '';
+
+  if (!items.length) {
+    const e = el('div', '', 'empty');
+    e.appendChild(el('span', query ? '?' : EMPTY[filter][0], 'big'));
+    e.appendChild(el('div', query ? 'No matches. Try another word or switch queue.' : EMPTY[filter][1]));
+    if (!query && EMPTY[filter][2] === 'copy') {
+      const row = el('div', '', 'row');
+      const c = el('button', 'Copy student link', 'ghost small');
+      c.type = 'button';
+      c.onclick = () => {
+        if (navigator.clipboard) navigator.clipboard.writeText(data.studentUrl).then(() => toast('Student link copied — paste it in your class group.'));
+      };
+      row.appendChild(c);
+      e.appendChild(row);
+    }
+    box.appendChild(e);
+    return;
+  }
+  for (const d of items) {
+    const card = el('div', '', 'doubt d-' + d.status + (d.status === 'solved' ? ' solved-card' : '') + ((!isLive && !knownIds.has(d.id)) || (isLive && d._new) ? ' doubt-enter' : ''));
+    const head = el('div', '', 'doubt-head');
+    head.appendChild(avatarFor(d.name));
+    const who = el('div', '', 'who');
+    const nm = el('span', '', 'who-name');
+    nm.appendChild(highlight(d.name || 'Anonymous', query));
+    who.appendChild(nm);
+    who.appendChild(el('span', timeAgo(d.createdAt), 'who-time'));
+    head.appendChild(who);
+    head.appendChild(el('span', badgeLabel[d.status] || d.status, 'badge ' + (badgeClass[d.status] || '')));
+    card.appendChild(head);
+    const qt = el('div', '', 'qtext');
+    qt.appendChild(highlight(d.text, query));
+    card.appendChild(qt);
+    if (d.reason) {
+      const w = el('div', '', 'doubt-meta');
+      w.appendChild(el('span', metaGlyph[d.status] || '·', 'meta-mark'));
+      const t = document.createElement('span');
+      t.textContent = d.reason;
+      w.appendChild(t);
+      card.appendChild(w);
+    }
+    if (aiDetailsEnabled()) card.appendChild(aiBlock(d));
+    if (d.status === 'solved' && d.answer) {
+      const a = el('div', '', 'answer-given');
+      a.appendChild(el('div', "Your answer", 'ans-label'));
+      a.appendChild(el('div', d.answer, 'ans-text'));
+      card.appendChild(a);
+    }
+    if (d.status === 'accepted' || d.status === 'review') {
+      const f = el('div', '', 'ansform');
+      const ta = document.createElement('textarea');
+      ta.placeholder = 'Type your answer… (Ctrl/⌘ + Enter to solve)';
+      ta.value = drafts[d.id] || '';
+      ta.setAttribute('aria-label', `Answer for doubt from ${d.name || 'student'}: ${String(d.text).slice(0, 60)}`);
+      ta.addEventListener('input', () => { drafts[d.id] = ta.value; });
+      const sb = el('button', 'Solve with answer', 'small primary');
+      sb.onclick = () => solveDoubt(d.id, ta.value, sb, false);
+      ta.addEventListener('keydown', (ev) => {
+        if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') { ev.preventDefault(); solveDoubt(d.id, ta.value, sb, false); }
+      });
+      f.append(ta, sb);
+      card.appendChild(f);
+      const row = el('div', '', 'doubt-actions');
+      if (d.status === 'review') {
+        const okb = el('button', 'Looks legit — approve', 'ghost small');
+        okb.onclick = () => overrideDoubt(d.id, 'accepted');
+        row.appendChild(okb);
+      } else {
+        const dis = el('button', 'Mark solved · no answer', 'ghost small');
+        dis.onclick = () => solveDoubt(d.id, '', sb, true);
+        row.appendChild(dis);
+      }
+      if (confirmRejectId === d.id) {
+        const cf = el('div', '', 'confirm-row');
+        cf.appendChild(el('span', 'Move to filtered? The student is not told.', 'muted'));
+        const yes = el('button', 'Yes, filter it', 'small danger');
+        yes.onclick = () => { confirmRejectId = null; overrideDoubt(d.id, 'flagged'); };
+        const no = el('button', 'Keep', 'ghost small');
+        no.onclick = () => { confirmRejectId = null; renderList(false); };
+        cf.append(yes, no);
+        const wrap = el('div', '');
+        wrap.append(row, cf);
+        card.appendChild(wrap);
+      } else {
+        const rej = el('button', 'Reject as junk', 'ghost small danger');
+        rej.onclick = () => { confirmRejectId = d.id; renderList(false); };
+        row.appendChild(rej);
+        card.appendChild(row);
+      }
+    }
+    if (d.status === 'flagged') {
+      const row = el('div', '', 'doubt-actions');
+      const okb = el('button', 'Actually legit — restore', 'ghost small');
+      okb.onclick = () => overrideDoubt(d.id, 'accepted');
+      row.appendChild(okb);
+      card.appendChild(row);
+    }
+    box.appendChild(card);
+  }
+}
+
+async function solveDoubt(id, answer, btn, noAnswer) {
+  if (!noAnswer && !String(answer).trim()) {
+    toast('Type an answer first — or use “Mark solved · no answer”.');
+    return;
+  }
+  if (noAnswer && !confirm('Mark solved without an answer? The student will see their question with no solution.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Solving…'; }
+  try {
+    const r = await fetch(`/api/teacher/${encodeURIComponent(token)}/solve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, answer }),
+    });
+    if (!r.ok) { toast('Could not mark solved — check connection.'); if (btn) { btn.disabled = false; } renderList(false); return; }
+    delete drafts[id];
+    toast('Marked solved — students see it instantly.');
+    await reload(true);
+  } catch { toast('Could not reach the server.'); if (btn) btn.disabled = false; }
+}
+async function overrideDoubt(id, to) {
+  try {
+    const r = await fetch(`/api/teacher/${encodeURIComponent(token)}/override`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, to }),
+    });
+    if (!r.ok) { toast('Action failed — check connection.'); return; }
+    toast(to === 'accepted' ? 'Restored to the queue.' : 'Moved to filtered.');
+    await reload(true);
+  } catch { toast('Could not reach the server.'); }
+}
+
+async function reload(silent) {
+  try {
+    const r = await fetch(`/api/teacher/${encodeURIComponent(token)}`);
+    if (!r.ok) return;
+    const fresh = await r.json();
+    const freshIds = new Set((fresh.doubts || []).map((d) => d.id));
+    let newOne = null;
+    if (knownIds.size && fresh.doubts) {
+      for (const d of fresh.doubts) {
+        if (!knownIds.has(d.id) && (d.status === 'accepted' || d.status === 'review')) { d._new = true; newOne = newOne || d; }
+      }
+    }
+    knownIds = freshIds;
+    data = fresh;
+    renderHead(); renderStats(); renderSettings(); renderList(true);
+    if (!silent) bindShare();
+    if (newOne) toast(`New doubt from ${newOne.name || 'a student'}: “${String(newOne.text).slice(0, 60)}${newOne.text.length > 60 ? '…' : ''}”`);
+  } catch { /* keep old view */ }
+}
+
+/* Display settings */
+const toggleAI = document.getElementById('toggleAI');
+const settingsMenu = document.getElementById('settingsMenu');
+if (toggleAI) {
+  toggleAI.checked = aiDetailsEnabled();
+  toggleAI.addEventListener('change', () => {
+    try { localStorage.setItem(AI_KEY, toggleAI.checked ? '1' : '0'); } catch {}
+    renderList(false);
+    toast(toggleAI.checked ? 'AI filter details shown.' : 'AI filter details hidden.');
+  });
+}
+document.addEventListener('click', (e) => {
+  if (settingsMenu && settingsMenu.open && !settingsMenu.contains(e.target)) settingsMenu.open = false;
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsMenu && settingsMenu.open) {
+    settingsMenu.open = false;
+    settingsMenu.querySelector('summary').focus();
+  }
+});
+
+let es = null;
+function connectStream() {
+  if (es) return;
+  try {
+    es = new EventSource(`/api/teacher/${encodeURIComponent(token)}/stream`);
+    es.addEventListener('doubt', () => reload(true));
+    es.addEventListener('settings', () => reload(true));
+    es.onerror = () => { es.close(); es = null; setTimeout(connectStream, 5000); };
+  } catch { /* polling fallback below */ }
+}
+setInterval(() => { if (!es && data) reload(true); }, 10000);
+window.addEventListener('resize', () => { if (data) buildMobileShare(); });
+
+load();
+</script>
+</body>
+</html>

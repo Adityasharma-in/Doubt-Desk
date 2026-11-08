@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DoubtDesk — keep the doubts, lose the noise</title>
+<meta name="description" content="One link for your class. Genuine study doubts reach you; chit-chat, ads and abuse stay out of the queue.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="animate-landing">
+<div class="wrap">
+  <nav class="top" aria-label="Main">
+    <div class="logo" aria-hidden="true">Dd</div>
+    <div class="brand">DoubtDesk <small>A quieter doubt queue</small></div>
+    <div class="top-links">
+      <span class="top-pill hide-m">Hindi · Hinglish · English</span>
+    </div>
+  </nav>
+
+  <main class="landing">
+    <section class="intro" aria-labelledby="pageTitle">
+      <p class="kicker">Session register · for teachers</p>
+      <h1 id="pageTitle">Keep the doubts.<br><span class="mark">Lose the noise.</span></h1>
+      <p class="lead">Open one room, share one link, and let the filter clear the chit-chat, ads and abuse. What reaches you is a question worth answering.</p>
+
+      <ol class="process">
+        <li>
+          <span class="num">01</span>
+          <div><b>Open a session</b><p>Name the class and decide what should reach you.</p></div>
+        </li>
+        <li>
+          <span class="num">02</span>
+          <div><b>Share one link</b><p>Students join from any phone. No app, no login.</p></div>
+        </li>
+        <li>
+          <span class="num">03</span>
+          <div><b>Answer what matters</b><p>Genuine questions land live. Junk stays recoverable in the filtered queue.</p></div>
+        </li>
+      </ol>
+
+      <p class="margin-note">Nothing is silently deleted. Borderline messages wait in <b>Needs review</b>, and every filtered message can be restored.</p>
+    </section>
+
+    <section class="slip" aria-labelledby="newSessionH">
+      <div class="slip-head"><span>New session</span><strong>About 20 seconds</strong></div>
+      <div class="slip-body">
+        <h2 id="newSessionH">Start the register</h2>
+        <p class="card-sub">Students join with a link. No app, no login.</p>
+
+        <form id="createForm" novalidate>
+          <label class="field" for="title">Session title</label>
+          <input id="title" maxlength="80" placeholder="Class 10 Maths — Chapter 5 doubts" required autocomplete="off" aria-describedby="titleErr">
+          <p class="field-hint" id="titleErr" hidden>Give your session a title so students recognise it.</p>
+
+          <label class="field" for="subject">Subject <span id="subjectNote">(needed only for subject mode)</span></label>
+          <input id="subject" maxlength="60" placeholder="Mathematics" autocomplete="off">
+
+          <label class="eyebrow-label" id="modeLabel">Which doubts should reach you?</label>
+          <div class="mode-cards cols-3" id="modeSeg" role="group" aria-labelledby="modeLabel">
+            <button type="button" class="mode-card" data-mode="subject" aria-pressed="false">
+              <span class="mode-mark" aria-hidden="true"></span>
+              <span>
+                <span class="mode-name">Subject only</span>
+                <span class="mode-desc">Only doubts about this subject.</span>
+              </span>
+            </button>
+            <button type="button" class="mode-card" data-mode="chapter" aria-pressed="false">
+              <span class="mode-mark" aria-hidden="true"></span>
+              <span>
+                <span class="mode-name">Strict chapter</span>
+                <span class="mode-desc">Only the named chapter. The rest is held back.</span>
+              </span>
+            </button>
+            <button type="button" class="mode-card active" data-mode="both" aria-pressed="true">
+              <span class="mode-mark" aria-hidden="true"></span>
+              <span>
+                <span class="mode-name">All study doubts</span>
+                <span class="mode-desc">Any genuine question. Spam still blocked.</span>
+              </span>
+            </button>
+          </div>
+          <p class="field-hint" id="modeHint">Any genuine study doubt reaches you. Spam, chit-chat and abuse are still filtered out.</p>
+
+          <div id="chapterWrap" style="display:none">
+            <label class="field" for="chapter">Chapter / topic</label>
+            <input id="chapter" maxlength="80" placeholder="Quadratic Equations" autocomplete="off">
+          </div>
+
+          <div class="row" style="margin-top:20px">
+            <button type="submit" class="primary" id="createBtn">Create session &amp; get link →</button>
+          </div>
+        </form>
+        <div id="result" aria-live="polite"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>DoubtDesk · made for classrooms</span>
+    <span>AI-assisted filtering — you always have the final say</span>
+  </footer>
+</div>
+
+<script>
+const form = document.getElementById('createForm');
+const result = document.getElementById('result');
+const btn = document.getElementById('createBtn');
+const titleEl = document.getElementById('title');
+const subjectEl = document.getElementById('subject');
+const chapterEl = document.getElementById('chapter');
+const titleErr = document.getElementById('titleErr');
+const subjectNote = document.getElementById('subjectNote');
+
+function copyText(t, b) {
+  const done = () => { b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(done).catch(() => fallbackCopy(t, done));
+  } else fallbackCopy(t, done);
+}
+function fallbackCopy(t, done) {
+  const ta = document.createElement('textarea');
+  ta.value = t; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch {}
+  ta.remove();
+}
+
+function note(kind, text) {
+  result.innerHTML = '';
+  const d = document.createElement('div');
+  d.className = 'notice ' + kind;
+  d.textContent = text;
+  result.appendChild(d);
+  d.setAttribute('tabindex', '-1');
+  d.focus({ preventScroll: false });
+  return d;
+}
+
+let filterMode = 'both';
+const HINTS = {
+  subject: 'Only doubts about this subject reach your queue. Genuine doubts from other subjects are filtered out.',
+  chapter: 'Strict mode: only doubts about the chapter above reach you. Everything else is filtered or queued for review.',
+  both: 'Any genuine study doubt reaches you. Spam, chit-chat and abuse are still filtered out.',
+};
+const seg = document.getElementById('modeSeg');
+const chapterWrap = document.getElementById('chapterWrap');
+const modeHint = document.getElementById('modeHint');
+function setMode(mode) {
+  filterMode = mode;
+  seg.querySelectorAll('.mode-card').forEach((x) => {
+    const on = x.dataset.mode === mode;
+    x.classList.toggle('active', on);
+    x.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  chapterWrap.style.display = mode === 'chapter' ? '' : 'none';
+  modeHint.textContent = HINTS[mode];
+  subjectNote.textContent = mode === 'subject' ? '(required for subject mode)' : '(needed only for subject mode)';
+}
+seg.addEventListener('click', (e) => {
+  const b = e.target.closest('.mode-card');
+  if (!b) return;
+  setMode(b.dataset.mode);
+});
+seg.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.preventDefault();
+  const cards = [...seg.querySelectorAll('.mode-card')];
+  const i = cards.findIndex((c) => c.dataset.mode === filterMode);
+  const next = cards[(i + (e.key === 'ArrowRight' ? 1 : cards.length - 1)) % cards.length];
+  setMode(next.dataset.mode);
+  next.focus();
+});
+setMode('both');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  btn.disabled = true;
+  result.innerHTML = '';
+  titleEl.removeAttribute('aria-invalid');
+  titleErr.hidden = true;
+  const titleVal = titleEl.value.trim();
+  const subjectVal = subjectEl.value.trim();
+  const chapterVal = (chapterEl.value || '').trim();
+  if (!titleVal) {
+    titleEl.setAttribute('aria-invalid', 'true');
+    titleErr.hidden = false;
+    note('warn', 'Give your session a title — for example “Class 10 Maths doubts”.');
+    btn.disabled = false;
+    titleEl.focus();
+    return;
+  }
+  if (filterMode === 'chapter' && !chapterVal) { note('warn', 'Strict chapter mode needs a chapter name — for example “Quadratic Equations”.'); btn.disabled = false; return; }
+  if (filterMode === 'subject' && !subjectVal) { note('warn', 'Subject-only mode needs a subject — or choose “All study doubts”.'); btn.disabled = false; return; }
+  btn.textContent = 'Creating…';
+  try {
+    const r = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: titleVal, subject: subjectVal, mode: filterMode, chapter: chapterVal }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed to create session');
+
+    result.innerHTML = '';
+    const splash = document.createElement('div');
+    splash.className = 'code-splash';
+    const codeEl = document.createElement('div');
+    codeEl.className = 'code';
+    codeEl.textContent = data.code;
+    const cap = document.createElement('div');
+    const capTitle = document.createElement('div');
+    capTitle.className = 'cap-title';
+    capTitle.textContent = 'Session live';
+    const capNote = document.createElement('div');
+    capNote.className = 'cap';
+    capNote.textContent = 'Share the student link below.';
+    cap.append(capTitle, capNote);
+    splash.append(codeEl, cap);
+    result.appendChild(splash);
+
+    const mk = (label, url, secret) => {
+      const lab = document.createElement('p');
+      lab.className = secret ? 'secret-label' : 'field';
+      lab.style.margin = '16px 0 0';
+      if (secret) {
+        const lock = document.createElement('span');
+        lock.className = 'lock';
+        lock.textContent = 'Private';
+        lab.append(lock, document.createTextNode(label));
+      } else {
+        lab.textContent = label;
+      }
+      const box = document.createElement('div');
+      box.className = 'linkbox' + (secret ? ' secretbox' : '');
+      const sp = document.createElement('span');
+      sp.textContent = url;
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'ghost'; b.textContent = 'Copy';
+      b.onclick = () => copyText(url, b);
+      box.append(sp, b);
+      result.append(lab, box);
+      if (secret) {
+        const warn = document.createElement('p');
+        warn.className = 'field-hint';
+        warn.textContent = 'Never share this. Anyone with it can solve, reject and change your filter.';
+        result.appendChild(warn);
+      }
+    };
+    mk('Student link — share with your class', data.studentUrl, false);
+    mk('Your dashboard — keep this private', data.teacherUrl, true);
+
+    const go = document.createElement('div');
+    go.className = 'row';
+    go.style.marginTop = '16px';
+    const a = document.createElement('a');
+    a.href = data.teacherUrl;
+    a.className = 'btn primary';
+    a.textContent = 'Open dashboard →';
+    const wa = document.createElement('button');
+    wa.type = 'button'; wa.className = 'ghost';
+    wa.textContent = 'Share on WhatsApp';
+    wa.onclick = () => window.open('https://wa.me/?text=' + encodeURIComponent('Join my doubt session: ' + data.studentUrl), '_blank', 'noopener');
+    go.append(a, wa);
+    result.appendChild(go);
+    result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) {
+    note('err', err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Create session &amp; get link →';
+  }
+});
+</script>
+</body>
+</html>
